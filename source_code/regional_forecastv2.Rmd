@@ -1,0 +1,403 @@
+---
+title: "Industry Forecast: Regional Overview (2025 Edition)"
+output: 
+    flexdashboard::flex_dashboard:
+     orientation: columns
+     vertical_layout: fill
+runtime: shiny
+---
+
+```{r global, include=FALSE}
+# load data in 'global' chunk so it can be shared by all users of the dashboard
+
+library(vroom)
+library(here)
+library(dplyr)
+library(conflicted)
+library(shiny)
+library(ggplot2)
+library(plotly)
+library(scales)
+conflicts_prefer(dplyr::filter)
+
+
+region_by_industry <- vroom(here("input", "industryForecast_regionShares.csv"), delim = ",") |> 
+  arrange(aggregate_industry, lmo_industry)
+
+
+library(scales)
+employment_trend <- vroom(here("input", "industryForecast_regionTrends.csv"), delim = ",") |> 
+  mutate(employment_share = round(employment_share, 3))
+
+
+# Source for including filters in tabspane
+# https://stackoverflow.com/questions/73544318/how-to-filters-across-multiple-tabs-r-shiny
+# Convert ggplot2 to plotly - https://rdrr.io/cran/plotly/man/ggplotly.html
+```
+
+
+Sidebar {.sidebar data-width=300}
+=====================================
+
+Notes: \
+1) previous_forecast = Industry 6th cut (2024 edition) \
+2) cagr10years calculation based on \
+-\--> lfs historical = 10 years moving average \
+-\--> lmo forecast (last year) = forecast data 
+
+
+```{r}
+  # # Application title
+  # 
+  #                  shinyWidgets::pickerInput("industry1", label = "Select Aggregate Industry",
+  #                              choices = unique(employment_trend$aggregate_industry),
+  #                              selected = "Accomodation and food services", options = list(`live-search`=TRUE))
+  # 
+  #                  selectInput("industry", label = "Select LMO Industry",
+  #                              choices = unique(employment_trend$lmo_industry),
+  #                              selected = "Accomodation services")
+  #                              
+  #                   selectInput("metric", label = "Select LM Metric",
+  #                              choices = c("employment", "employment_share"),
+  #                              selected = "employment")
+  #  
+
+
+# custom aggregate industry order
+industry_order <- c("Agriculture and fishing", "Mining and oil and gas extraction", "Construction",
+        "Manufacturing", "Retail trade", "Transportation and warehousing",
+        "Finance, insurance and real estate", "Professional, scientific and technical services",
+        "Business, building and other support services", "Educational services",
+        "Health care and Social assistance", "Information, culture and recreation",
+        "Accommodation and food services", "Repair, personal and non-profit services",
+        "Public administration", "Total")
+                    
+# Application title and UI components grouped with space between them
+tags$div(
+  # Industry pickerInput
+  shinyWidgets::pickerInput("industry1", label = "Select Aggregate Industry",
+                            choices = industry_order,
+                            selected = "Accomodation and food services", options = list(`live-search`=TRUE)),
+  
+  # Add space after the industry picker
+  tags$br(),
+  
+  
+                   selectInput("industry", label = "Select LMO Industry",
+                               choices = unique(employment_trend$lmo_industry),
+                               selected = "Accomodation services"),
+  
+    tags$br(),
+  
+                      selectInput("metric", label = "Select LM Metric",
+                               choices = c("employment", "employment_share"),
+                               selected = "employment"),
+  
+  tags$br(),
+  
+  # Trend type checkbox group
+  shinyWidgets::prettyCheckboxGroup(
+    inputId = "trend_type",
+    label = "Select Trend to Show", 
+    choices = unique(employment_trend$data_type),
+    selected = unique(employment_trend$data_type),
+    icon = icon("square-check"), 
+    status = "primary",
+    outline = TRUE,
+    animation = "jelly"
+  ),
+  
+  # # Add space after the trend type checkbox group
+  # tags$br(),
+  
+  # Check box to show trendline (lowess smoothing)
+  
+checkboxInput("show_trendline", "Show Lowess Trend", value = FALSE),
+
+  
+  # Region pickerInput
+  shinyWidgets::pickerInput(
+    inputId = "region",
+    label = "Select/deselect all regions", 
+    choices = unique(employment_trend$bc_region),
+    selected = unique(employment_trend$bc_region),
+    multiple = TRUE,
+    options = shinyWidgets::pickerOptions(container = "body", actionsBox = TRUE),
+    width = "100%"
+  ),
+  
+
+    # Add space after the buttons
+  tags$br(),
+
+    # Button for Y-axis fixed at zero
+  actionButton("fixed_zero", label = "Fix Y-Axis at Zero", icon = icon("arrows-alt-v")), 
+  
+    # Add space after the buttons
+  tags$br(),
+  tags$br(),
+
+   # Toggle Y-axis view button
+  actionButton("toggle_y_axis", label = "Toggle Y-Axis View", icon = icon("refresh"))
+
+)
+
+                    
+# Reactive value to control Y-axis scaling
+y_axis_scale <- reactiveVal("free_y")  # default to free_y for dynamic scaling
+
+# Reactive value to control Y-axis limits
+y_axis_limits <- reactiveVal(c(NA, NA))  # default to no limits
+
+# Observe event for toggling Y-axis view
+observeEvent(input$toggle_y_axis, {
+  # Toggle the Y-axis view between "free_y" and "fixed"
+  if (y_axis_scale() == "free_y") {
+    y_axis_scale("fixed")
+    y_axis_limits(c(NA, NA))  # Reset to no fixed limits
+  } else {
+    y_axis_scale("free_y")
+  }
+})
+
+# Observe event for fixing Y-axis at zero
+observeEvent(input$fixed_zero, {
+  # Set Y-axis to be fixed at zero
+  y_axis_scale("fixed")
+  y_axis_limits(c(0, NA))  # Fix Y-axis starting at zero
+})
+
+
+
+  observe({
+    x <- region_by_industry |> filter(aggregate_industry %in% c(input$industry1)) |>  select(lmo_industry) 
+    updateSelectInput(session, "industry", "Select LMO Industry", choices=unique(x))
+  })
+                   
+
+```
+Recommended view: \
+yaxis to zero then toggle
+
+Employment trend
+================================
+Column { horizontal_layout: scroll}
+-----------------------------------------------------------------------
+
+
+```{r}
+# Get Dark2 colors from RColorBrewer
+dark2_colors <- RColorBrewer::brewer.pal(8, "Dark2")
+
+employment_trend_rv <- reactive({
+  # Filter data first
+  employ_trend <- employment_trend |> 
+    filter(
+      aggregate_industry %in% input$industry1, 
+      lmo_industry %in% input$industry,
+      bc_region %in% input$region,
+      data_type %in% input$trend_type
+    ) 
+
+  # ✅ Validation: Make sure at least one bc_region is present
+  validate(
+    need(nrow(employ_trend) > 0, "Applying filter updates...")
+  )
+
+  # Graph of the employment trend 
+  employ_trend_graph <- employ_trend |> 
+     ggplot(aes(x = year, y = .data[[input$metric]], group = data_type, colour = data_type, label = cagr10yrs)
+  ) + 
+    geom_line()
+
+  # Optional trendline
+  if (input$show_trendline) {
+    employ_trend_graph <- employ_trend_graph +
+      geom_smooth(
+        data = ~subset(., data_type == "lfs_historical"),
+        aes(x = year, y = .data[[input$metric]]),
+        method = "loess",
+        span = 0.80,
+        se = FALSE,
+        linetype = "dotted",
+        linewidth = 0.5,
+        alpha = 0.3,
+        colour = "gray40"
+      )
+  }
+
+  # Labels and facets
+  employ_trend_graph <- employ_trend_graph + 
+    labs(x = "", y = "", title = input$industry) +
+    facet_wrap(~bc_region, scales = y_axis_scale()) +
+    scale_color_manual(values = dark2_colors)
+
+  # Y-axis scaling
+  if (input$metric == "employment") {
+    employ_trend_graph <- employ_trend_graph + 
+      scale_y_continuous(
+        labels = scales::label_number(scale = 1e-3, suffix = "k"),
+        limits = y_axis_limits()
+      )
+  } else if (input$metric == "employment_share") {
+    employ_trend_graph <- employ_trend_graph + 
+      scale_y_continuous(
+        labels = scales::label_percent(accuracy = 0.1),
+        limits = y_axis_limits()
+      )
+  }
+
+  # Return plotly object
+  ggplotly(employ_trend_graph, height = 850, width = 1375, tooltip = c("year", "colour", input$metric, "cagr10yrs"))
+})
+
+ plotly::renderPlotly({
+   
+     employment_trend_rv() |>
+      #plotly::style(showlegend = FALSE) |>
+      plotly::layout(margin = list(b = 10),
+              legend = list(
+        orientation = "h",       # Horizontal orientation
+        x = 0.5,                 # Center the legend horizontally
+        xanchor = "center",      # Anchor the legend at the center horizontally
+        y = -0.05,               # Position the legend slightly below the plot
+        yanchor = "top",         # Anchor the legend at the top (relative to y)
+        title = list(text = "")  # Remove the title by setting it to an empty string
+      )
+      )
+
+  })
+
+
+```
+Average annual shares of employment
+================================
+Column { horizontal_layout: scroll}
+-----------------------------------------------------------------------
+
+```{r}
+
+  observe({
+    x <- region_by_industry %>% filter(aggregate_industry %in% c(input$industry1)) %>%  select(lmo_industry) 
+    updateSelectInput(session, "industry", "Select LMO Industry", choices=unique(x))
+  })
+  
+
+  region_industry_rv <- reactive({
+    
+    reg_by_ind <- region_by_industry %>% 
+      filter(aggregate_industry %in% c(input$industry1), lmo_industry %in% c(input$industry)) %>% 
+      ggplot(aes(x=source, y=share, fill = bc_region)) + 
+      geom_bar(stat="identity") +
+      labs( x= "", y= "", title = input$industry) +
+      facet_wrap(~bc_region) +
+      scale_fill_manual(values = dark2_colors)  # Apply Dark2 colors to the 'colour' aesthetic
+    
+    ggplotly(reg_by_ind, height = 850, width = 1375)
+  })
+
+  plotly::renderPlotly({
+    fig1 <- region_industry_rv() 
+    fig1 <- fig1 %>% 
+      plotly::style(showlegend = FALSE) %>% 
+      plotly::layout(margin = list(b = 10))
+    #https://stackoverflow.com/questions/44848987/shiny-plotlyoutput-not-responding-to-height-and-width-sizes
+  })
+  
+
+```
+<!-- lmo.industry share of agg.industry by region -->
+<!-- ================================ -->
+<!-- Column { vertical_layout: scroll} -->
+<!-- ----------------------------------------------------------------------- -->
+
+<!-- ```{r} -->
+
+<!--  selectInput("region", label = "Select Region", -->
+<!--                       choices = unique(industry_by_region$bc_region), -->
+<!--                       selected = "Lower Mainland-Southwest") -->
+
+<!--     industry_region_rv <- reactive({ -->
+
+<!--     ind_by_reg <- industry_by_region %>%  -->
+<!--       filter(bc_region %in% c(input$region), aggregate_industry %in% c(input$industry1)) %>%  -->
+<!--       ggplot(aes(x=source, y=share, fill = lmo_industry)) +  -->
+<!--       geom_bar(stat="identity") + -->
+<!--       labs( x= "", y= "", title = paste(input$region, input$industry1, sep = ": ")) + -->
+<!--       facet_wrap(~lmo_industry, ncol = 2) -->
+
+<!--     ggplotly(ind_by_reg, height = 850, width = 1050) -->
+
+<!--   }) -->
+
+<!--     plotly::renderPlotly({ -->
+<!--     fig2 <- industry_region_rv() -->
+<!--     fig2 <- fig2 %>% -->
+<!--       plotly::style(showlegend = FALSE) %>% -->
+<!--       plotly::layout(margin = list(b = 10)) -->
+<!--   }) -->
+
+<!-- ``` -->
+
+CAGR
+================================
+Column { vertical_layout: scroll}
+-----------------------------------------------------------------------
+```{r}
+
+# UI elements for user input
+inputPanel(
+  numericInput("beginning_value", "Beginning Value", value = 1000, min = 0, step = 1),
+  numericInput("ending_value", "Ending Value", value = 2000, min = 0, step = 1),
+  numericInput("start_year", "Start Year", value = 2025, min = 1900, step = 1),
+  numericInput("end_year", "End Year", value = 2035, min = 1900, step = 1)
+)
+
+# Function to calculate Compound Annual Growth Rate (CAGR)
+calculate_cagr <- function(beginning_value, ending_value, start_year, end_year) {
+  if (end_year <= start_year) {
+    stop("End year must be greater than start year.")
+  }
+  
+  # Calculate the number of years
+  n_years <- end_year - start_year
+  
+  # Calculate the CAGR
+  cagr <- (ending_value / beginning_value)^(1 / n_years) - 1
+  
+  return(cagr)
+}
+
+# Function to calculate Percentage Change
+calculate_percentage_change <- function(beginning_value, ending_value) {
+  # Ensure beginning_value is greater than zero
+  if (beginning_value == 0) {
+    stop("Beginning value cannot be zero.")
+  }
+  
+  # Calculate the percentage change
+  percentage_change <- ((ending_value - beginning_value) / beginning_value) * 100
+  
+  return(percentage_change)
+}
+
+# Server code for rendering the result based on input values
+renderUI({
+  req(input$beginning_value, input$ending_value, input$start_year, input$end_year)
+  
+  # Calculate CAGR
+  cagr_value <- calculate_cagr(input$beginning_value, input$ending_value, input$start_year, input$end_year)
+  
+  # Calculate Percentage Change
+  percentage_change_value <- calculate_percentage_change(input$beginning_value, input$ending_value)
+  
+  # Display both CAGR and Percentage Change
+  HTML(paste("<br>",
+    "The Compound Annual Growth Rate (CAGR) is: ", round(cagr_value * 100, 2), "%<br>",
+             "<br>",
+        "The Simple Percentage Change is: ", round(percentage_change_value, 2), "%",
+        sep = ""))
+})
+
+
+```
