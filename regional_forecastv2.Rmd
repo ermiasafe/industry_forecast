@@ -21,12 +21,12 @@ library(scales)
 conflicts_prefer(dplyr::filter)
 
 
-region_by_industry <- vroom(here("input", "industryForecast_regionShares.csv"), delim = ",") |> 
+region_by_industry <- vroom(here("industryForecast_regionShares.csv"), delim = ",") |> 
   arrange(aggregate_industry, lmo_industry)
 
 
 library(scales)
-employment_trend <- vroom(here("input", "industryForecast_regionTrends.csv"), delim = ",") |> 
+employment_trend <- vroom(here("industryForecast_regionTrends.csv"), delim = ",") |> 
   mutate(employment_share = round(employment_share, 3))
 
 
