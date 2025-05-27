@@ -64,7 +64,7 @@ hist_last_year = 2024 # lfs data most recent year available
 cf_first_year = 2025 # current forecast first year
 cf_last_year = cf_first_year + 10
 
-pf_first_year = cf_first_year - 1 # previous forecast first year. This should be -1 when the previous forecast is last year
+pf_first_year = cf_first_year # previous forecast first year. This should be -1 when the previous forecast is last year
 
 hist_recent_cutoff = hist_last_year - 2 # most recent three years
 hist_prev_cutoff1 = hist_last_year - 3 # end of previous ten years

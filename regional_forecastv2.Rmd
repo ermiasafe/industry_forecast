@@ -40,7 +40,7 @@ Sidebar {.sidebar data-width=300}
 =====================================
 
 Notes: \
-1) previous_forecast = Industry 6th cut (2024 edition) \
+1) previous_forecast = 1st cut \
 2) cagr10years calculation based on \
 -\--> lfs historical = 10 years moving average \
 -\--> lmo forecast (last year) = forecast data 
@@ -125,6 +125,12 @@ checkboxInput("show_trendline", "Show Lowess Trend", value = FALSE),
     options = shinyWidgets::pickerOptions(container = "body", actionsBox = TRUE),
     width = "100%"
   ),
+
+  # This message only shows when employment_share is selected
+conditionalPanel(
+  condition = "input.metric == 'employment_share'",
+  tags$p(style = "color:red;", HTML("Tip: Deselect \"British Columbia\"<br> for full chart view.")
+)),
   
 
     # Add space after the buttons
@@ -138,7 +144,10 @@ checkboxInput("show_trendline", "Show Lowess Trend", value = FALSE),
   tags$br(),
 
    # Toggle Y-axis view button
-  actionButton("toggle_y_axis", label = "Toggle Y-Axis View", icon = icon("refresh"))
+  actionButton("toggle_y_axis", label = "Toggle Y-Axis View", icon = icon("refresh")),
+
+tags$p(style = "color:blue;", HTML("Tip for chart view:<br>Y-axis at zero, then toggle."))
+
 
 )
 
@@ -176,8 +185,6 @@ observeEvent(input$fixed_zero, {
                    
 
 ```
-Recommended view: \
-yaxis to zero then toggle
 
 Employment trend
 ================================
