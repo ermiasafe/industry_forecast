@@ -82,10 +82,16 @@ tags$div(
   # Add space after the industry picker
   tags$br(),
   
-  
-                   selectInput("industry", label = "Select LMO Industry",
-                               choices = unique(employment_trend$lmo_industry),
-                               selected = "Accomodation services"),
+shinyWidgets::pickerInput(
+  inputId = "industry",
+  label = "Select LMO Industry",
+  choices = unique(employment_trend$lmo_industry),
+  selected = "Accomodation services",
+  options = list(`live-search` = TRUE,
+                   style = "btn-success")  # changes the dropdown *button* color (not the search box)
+
+),
+
   
     tags$br(),
   
@@ -178,11 +184,21 @@ observeEvent(input$fixed_zero, {
 
 
 
-  observe({
-    x <- region_by_industry |> filter(aggregate_industry %in% c(input$industry1)) |>  select(lmo_industry) 
-    updateSelectInput(session, "industry", "Select LMO Industry", choices=unique(x))
-  })
-                   
+observe({
+  # Filter based on input from another pickerInput ("industry1")
+  x <- region_by_industry |>
+    filter(aggregate_industry %in% input$industry1) |>
+    pull(lmo_industry)  # more direct than select() + unique()
+
+  # Update the "industry" pickerInput with the filtered choices
+  shinyWidgets::updatePickerInput(
+    session = session,
+    inputId = "industry",
+    label = "Select LMO Industry",
+    choices = unique(x)
+  )
+})
+            
 
 ```
 
