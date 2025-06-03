@@ -373,5 +373,5 @@ test
 
 
 
-vroom_write(data_region, here("industryForecast_regionShares.csv"), delim = ",")
-vroom_write(employment_trend_data, here("industryForecast_regionTrends.csv"), delim = ",")
+vroom_write(data_region, here("output","industryForecast_regionShares.csv"), delim = ",")
+vroom_write(employment_trend_data, here("output","industryForecast_regionTrends.csv"), delim = ",")

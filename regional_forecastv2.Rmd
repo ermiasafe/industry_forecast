@@ -1,11 +1,13 @@
 ---
-title: "Industry Forecast: Regional Overview (2025 Edition)"
-author: "Ermias Afeworki"
-output: 
-    flexdashboard::flex_dashboard:
-     orientation: columns
-     vertical_layout: fill
+title: 'Industry Forecast: Regional Overview (2025 Edition)'
+output:
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
 runtime: shiny
+resource_files:
+- output/industryForecast_regionTrends.csv
+- output/industryForecast_regionShares.csv
 ---
 
 ```{r global, include=FALSE}
@@ -22,12 +24,12 @@ library(scales)
 conflicts_prefer(dplyr::filter)
 
 
-region_by_industry <- vroom(here("industryForecast_regionShares.csv"), delim = ",") |> 
+region_by_industry <- vroom(here("output","industryForecast_regionShares.csv"), delim = ",") |> 
   arrange(aggregate_industry, lmo_industry)
 
 
 library(scales)
-employment_trend <- vroom(here("industryForecast_regionTrends.csv"), delim = ",") |> 
+employment_trend <- vroom(here("output","industryForecast_regionTrends.csv"), delim = ",") |> 
   mutate(employment_share = round(employment_share, 3))
 
 
@@ -45,6 +47,7 @@ Notes: \
 2) cagr10years calculation based on \
 -\--> lfs historical = 10 years moving average \
 -\--> lmo forecast (last year) = forecast data 
+
 
 
 ```{r}
@@ -153,8 +156,13 @@ conditionalPanel(
    # Toggle Y-axis view button
   actionButton("toggle_y_axis", label = "Toggle Y-Axis View", icon = icon("refresh")),
 
-tags$p(style = "color:blue;", HTML("Tip for chart view:<br>Y-axis at zero, then toggle."))
+tags$p(style = "color:blue;", HTML("Tip for chart view:<br>Y-axis at zero, then toggle.")),
 
+tags$p(
+  style = "font-size:14px;",
+  tags$strong("Contact: "),
+  tags$a(href = "mailto:ermias.afeworki@gov.bc.ca", "ermias.afeworki@gov.bc.ca")
+)
 
 )
 
