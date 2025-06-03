@@ -1,5 +1,6 @@
 ---
 title: "Industry Forecast: Regional Overview (2025 Edition)"
+author: "Ermias Afeworki"
 output: 
     flexdashboard::flex_dashboard:
      orientation: columns
