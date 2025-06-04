@@ -257,9 +257,16 @@ employment_share_by_industry <- employment_trend_data0 |>
 # Merge shares to trend data
 
 employment_trend_data <- employment_trend_data0 |> 
-  full_join(employment_share_by_industry)
-  
+  full_join(employment_share_by_industry) |> 
+  mutate(
+    cagr10yrs = if_else(
+      !is.na(cagr10yrs),
+      paste0(round(cagr10yrs * 100, 1), "%"),  # Format to 1 decimal place
+      NA_character_                            # Keep NA as character
+    )
+  )
 
+  
 # Subset the data for specific region and industry
 # For example, selecting "Vancouver Island and Coast" and "Employment (000s)"
 selected_data <- employment_trend_data |>

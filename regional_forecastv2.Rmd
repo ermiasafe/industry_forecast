@@ -43,7 +43,7 @@ Sidebar {.sidebar data-width=300}
 =====================================
 
 Notes: \
-1) previous_forecast = 1st cut \
+1) previous_forecast = 2nd cut \
 2) cagr10years calculation based on \
 -\--> lfs historical = 10 years moving average \
 -\--> lmo forecast (last year) = forecast data 
