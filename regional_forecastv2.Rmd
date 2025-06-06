@@ -136,12 +136,6 @@ checkboxInput("show_trendline", "Show Lowess Trend", value = FALSE),
     width = "100%"
   ),
 
-  # This message only shows when employment_share is selected
-conditionalPanel(
-  condition = "input.metric == 'employment_share'",
-  tags$p(style = "color:red;", HTML("Tip: Deselect \"British Columbia\"<br> for full chart view.")
-)),
-  
 
     # Add space after the buttons
   tags$br(),
@@ -218,6 +212,19 @@ Column { horizontal_layout: scroll}
 
 
 ```{r}
+  # This message only shows when employment_share and "British Columbia" are selected
+conditionalPanel(
+  condition = "
+    input.metric == 'employment_share' &&
+    input.region.indexOf('British Columbia') >= 0
+  ",
+  tags$p(
+    style = "color:red;",
+    HTML("Tip: Deselect \"British Columbia\" for full chart view.")
+  )
+)
+
+
 # Get Dark2 colors from RColorBrewer
 dark2_colors <- RColorBrewer::brewer.pal(8, "Dark2")
 
@@ -302,6 +309,109 @@ employment_trend_rv <- reactive({
 
 
 ```
+LMO industries by region
+================================
+Column { vertical_layout: scroll}
+-----------------------------------------------------------------------
+
+```{r}
+
+   # This message only shows when employment_share is selected
+conditionalPanel(
+  condition = "input.region && input.region.length > 1",
+  tags$p(style = "color:red;", HTML("Warning: Must select one region at a time"))
+)
+
+
+  observe({
+    x <- region_by_industry %>% filter(aggregate_industry %in% c(input$industry1)) %>%  select(lmo_industry) 
+    updateSelectInput(session, "industry", "Select LMO Industry", choices=unique(x))
+  })
+  
+
+employTrend_ind_rv <- reactive({
+  # Filter data first
+  employ_trend <- employment_trend |> 
+    filter(
+      aggregate_industry %in% input$industry1, 
+      #lmo_industry %in% input$industry,
+      bc_region %in% input$region,
+      data_type %in% input$trend_type
+    ) 
+
+  # ✅ Validation: Make sure at least one bc_region is present
+  validate(
+    need(nrow(employ_trend) > 0, "Applying filter updates...")
+  )
+
+  # Graph of the employment trend 
+  employ_trend_graph <- employ_trend |> 
+     ggplot(aes(x = year, y = .data[[input$metric]], group = data_type, colour = data_type, label = cagr10yrs)
+  ) + 
+    geom_line()
+
+  # Optional trendline
+  if (input$show_trendline) {
+    employ_trend_graph <- employ_trend_graph +
+      geom_smooth(
+        data = ~subset(., data_type == "lfs_historical"),
+        aes(x = year, y = .data[[input$metric]]),
+        method = "loess",
+        span = 0.80,
+        se = FALSE,
+        linetype = "dotted",
+        linewidth = 0.5,
+        alpha = 0.3,
+        colour = "gray40"
+      )
+  }
+
+  # Labels and facets
+  employ_trend_graph <- employ_trend_graph + 
+    labs(x = "", y = "", title = paste(input$industry1, "in", input$region)) +
+    facet_wrap(~lmo_industry, scales = y_axis_scale()) +
+    scale_color_manual(values = dark2_colors)
+
+  # Y-axis scaling
+  if (input$metric == "employment") {
+    employ_trend_graph <- employ_trend_graph + 
+      scale_y_continuous(
+        labels = scales::label_number(scale = 1e-3, suffix = "k"),
+        limits = y_axis_limits()
+      )
+  } else if (input$metric == "employment_share") {
+    employ_trend_graph <- employ_trend_graph + 
+      scale_y_continuous(
+        labels = scales::label_percent(accuracy = 0.1),
+        limits = y_axis_limits()
+      )
+  }
+
+  # Return plotly object
+  ggplotly(employ_trend_graph, height = 850, width = 1375, tooltip = c("year", "colour", input$metric, "cagr10yrs"))
+})
+
+ plotly::renderPlotly({
+   
+     employTrend_ind_rv() |>
+      #plotly::style(showlegend = FALSE) |>
+      plotly::layout(margin = list(b = 10),
+              legend = list(
+        orientation = "h",       # Horizontal orientation
+        x = 0.5,                 # Center the legend horizontally
+        xanchor = "center",      # Anchor the legend at the center horizontally
+        y = -0.05,               # Position the legend slightly below the plot
+        yanchor = "top",         # Anchor the legend at the top (relative to y)
+        title = list(text = "")  # Remove the title by setting it to an empty string
+      )
+      )
+
+  })
+ 
+
+
+```
+
 Average annual shares of employment
 ================================
 Column { horizontal_layout: scroll}
@@ -338,38 +448,6 @@ Column { horizontal_layout: scroll}
   
 
 ```
-<!-- lmo.industry share of agg.industry by region -->
-<!-- ================================ -->
-<!-- Column { vertical_layout: scroll} -->
-<!-- ----------------------------------------------------------------------- -->
-
-<!-- ```{r} -->
-
-<!--  selectInput("region", label = "Select Region", -->
-<!--                       choices = unique(industry_by_region$bc_region), -->
-<!--                       selected = "Lower Mainland-Southwest") -->
-
-<!--     industry_region_rv <- reactive({ -->
-
-<!--     ind_by_reg <- industry_by_region %>%  -->
-<!--       filter(bc_region %in% c(input$region), aggregate_industry %in% c(input$industry1)) %>%  -->
-<!--       ggplot(aes(x=source, y=share, fill = lmo_industry)) +  -->
-<!--       geom_bar(stat="identity") + -->
-<!--       labs( x= "", y= "", title = paste(input$region, input$industry1, sep = ": ")) + -->
-<!--       facet_wrap(~lmo_industry, ncol = 2) -->
-
-<!--     ggplotly(ind_by_reg, height = 850, width = 1050) -->
-
-<!--   }) -->
-
-<!--     plotly::renderPlotly({ -->
-<!--     fig2 <- industry_region_rv() -->
-<!--     fig2 <- fig2 %>% -->
-<!--       plotly::style(showlegend = FALSE) %>% -->
-<!--       plotly::layout(margin = list(b = 10)) -->
-<!--   }) -->
-
-<!-- ``` -->
 
 CAGR
 ================================
