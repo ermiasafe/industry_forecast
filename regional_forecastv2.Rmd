@@ -444,16 +444,18 @@ Column { horizontal_layout: scroll}
 
 ```{r}
 
-  observe({
-    x <- region_by_industry %>% filter(aggregate_industry %in% c(input$industry1)) %>%  select(lmo_industry) 
-    updateSelectInput(session, "industry", "Select LMO Industry", choices=unique(x))
-  })
-  
 
   region_industry_rv <- reactive({
     
-    reg_by_ind <- region_by_industry %>% 
-      filter(aggregate_industry %in% c(input$industry1), lmo_industry %in% c(input$industry)) %>% 
+    reg_by_ind <- region_by_industry |> 
+      filter(aggregate_industry %in% c(input$industry1), lmo_industry %in% c(input$industry)) 
+      
+  # ✅ Validation: Make sure at least one bc_region is present
+  validate(
+    need(nrow(reg_by_ind) > 0, "Applying filter updates...")
+  )
+  
+    reg_by_ind <-  reg_by_ind |> 
       ggplot(aes(x=source, y=share, fill = bc_region)) + 
       geom_bar(stat="identity") +
       labs( x= "", y= "", title = input$industry) +
