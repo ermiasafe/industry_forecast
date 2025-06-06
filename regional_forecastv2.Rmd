@@ -30,7 +30,8 @@ region_by_industry <- vroom(here("output","industryForecast_regionShares.csv"), 
 
 library(scales)
 employment_trend <- vroom(here("output","industryForecast_regionTrends.csv"), delim = ",") |> 
-  mutate(employment_share = round(employment_share, 3))
+  mutate(region_share = round(region_share, 3)) |> 
+  mutate(industry_share = round(industry_share, 3))
 
 
 # Source for including filters in tabspane
@@ -100,7 +101,7 @@ shinyWidgets::pickerInput(
     tags$br(),
   
                       selectInput("metric", label = "Select LM Metric",
-                               choices = c("employment", "employment_share"),
+                               choices = c("employment", "region_share", "industry_share"),
                                selected = "employment"),
   
   tags$br(),
@@ -215,7 +216,7 @@ Column { horizontal_layout: scroll}
   # This message only shows when employment_share and "British Columbia" are selected
 conditionalPanel(
   condition = "
-    input.metric == 'employment_share' &&
+    input.metric == 'region_share' &&
     input.region.indexOf('British Columbia') >= 0
   ",
   tags$p(
@@ -242,9 +243,17 @@ employment_trend_rv <- reactive({
   validate(
     need(nrow(employ_trend) > 0, "Applying filter updates...")
   )
+  
+  # Check for unsupported metric
+  if (input$metric == "industry_share") {
+    validate(
+      need(FALSE, 'Please select "region_share" or "employment" in the LM Metric dropdown.')
+    )
+  }
 
   # Graph of the employment trend 
   employ_trend_graph <- employ_trend |> 
+    filter(input$metric != "industry_share") |>
      ggplot(aes(x = year, y = .data[[input$metric]], group = data_type, colour = data_type, label = cagr10yrs)
   ) + 
     geom_line()
@@ -278,7 +287,7 @@ employment_trend_rv <- reactive({
         labels = scales::label_number(scale = 1e-3, suffix = "k"),
         limits = y_axis_limits()
       )
-  } else if (input$metric == "employment_share") {
+  } else if (input$metric == "region_share") {
     employ_trend_graph <- employ_trend_graph + 
       scale_y_continuous(
         labels = scales::label_percent(accuracy = 0.1),
@@ -316,18 +325,21 @@ Column { vertical_layout: scroll}
 
 ```{r}
 
+# Select one region at a time for this view
+
+selectInput("region2",
+            label = NULL,
+            choices = unique(employment_trend$bc_region),
+            selected = "British Columbia")
+
+
+
    # This message only shows when employment_share is selected
-conditionalPanel(
-  condition = "input.region && input.region.length > 1",
-  tags$p(style = "color:red;", HTML("Warning: Must select one region at a time"))
-)
+# conditionalPanel(
+#   condition = "input.region && input.region.length > 1",
+#   tags$p(style = "color:red;", HTML("Warning: Must select one region at a time"))
+# )
 
-
-  observe({
-    x <- region_by_industry %>% filter(aggregate_industry %in% c(input$industry1)) %>%  select(lmo_industry) 
-    updateSelectInput(session, "industry", "Select LMO Industry", choices=unique(x))
-  })
-  
 
 employTrend_ind_rv <- reactive({
   # Filter data first
@@ -335,7 +347,7 @@ employTrend_ind_rv <- reactive({
     filter(
       aggregate_industry %in% input$industry1, 
       #lmo_industry %in% input$industry,
-      bc_region %in% input$region,
+      bc_region %in% input$region2,
       data_type %in% input$trend_type
     ) 
 
@@ -343,12 +355,25 @@ employTrend_ind_rv <- reactive({
   validate(
     need(nrow(employ_trend) > 0, "Applying filter updates...")
   )
+  
+   # Check for unsupported metric
+  if (input$metric == "region_share") {
+    validate(
+      need(FALSE, 'Please select "industry_share" or "employment" in the LM Metric dropdown.')
+    )
+  }
 
-  # Graph of the employment trend 
-  employ_trend_graph <- employ_trend |> 
-     ggplot(aes(x = year, y = .data[[input$metric]], group = data_type, colour = data_type, label = cagr10yrs)
-  ) + 
-    geom_line()
+# Graph of the employment trend 
+# Filter out 'industry_share' before plotting
+employ_trend_graph <- employ_trend |>
+  filter(input$metric != "region_share") |> 
+  ggplot(aes(x = year,
+             y = .data[[input$metric]],
+             group = data_type,
+             colour = data_type,
+             label = cagr10yrs)) +
+  geom_line()
+
 
   # Optional trendline
   if (input$show_trendline) {
@@ -368,7 +393,7 @@ employTrend_ind_rv <- reactive({
 
   # Labels and facets
   employ_trend_graph <- employ_trend_graph + 
-    labs(x = "", y = "", title = paste(input$industry1, "in", input$region)) +
+    labs(x = "", y = "", title = paste(input$industry1, "-->", input$region2)) +
     facet_wrap(~lmo_industry, scales = y_axis_scale()) +
     scale_color_manual(values = dark2_colors)
 
@@ -379,7 +404,7 @@ employTrend_ind_rv <- reactive({
         labels = scales::label_number(scale = 1e-3, suffix = "k"),
         limits = y_axis_limits()
       )
-  } else if (input$metric == "employment_share") {
+  } else if (input$metric == "industry_share") {
     employ_trend_graph <- employ_trend_graph + 
       scale_y_continuous(
         labels = scales::label_percent(accuracy = 0.1),

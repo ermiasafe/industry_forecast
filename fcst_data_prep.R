@@ -252,12 +252,25 @@ employment_trend_data0 <- bind_rows(employment_forecast_mapped, historical_data)
 employment_share_by_industry <- employment_trend_data0 |> 
   filter(bc_region != "British Columbia") |> 
   group_by(data_type, lmo_industry, year) |> 
-  mutate(employment_share = employment/sum(employment))
+  mutate(region_share = employment/sum(employment))
+
+# Calculate industry share of employment by region
+employment_share_by_region <- employment_trend_data0 |>
+  filter(lmo_industry != "Total") |> 
+  group_by(data_type, bc_region, aggregate_industry, year) |> 
+  mutate(industry_share = employment/sum(employment))
+
+#Check share calculation
+share_check <- employment_share_by_region |> 
+  filter(bc_region == "Vancouver Island and Coast", year == 2024, 
+         data_type == "lfs_historical", 
+         aggregate_industry == "Educational services")
   
 # Merge shares to trend data
 
 employment_trend_data <- employment_trend_data0 |> 
-  full_join(employment_share_by_industry) |> 
+  full_join(employment_share_by_industry) |>
+  full_join(employment_share_by_region) |>
   mutate(
     cagr10yrs = if_else(
       !is.na(cagr10yrs),
@@ -275,7 +288,7 @@ selected_data <- employment_trend_data |>
 
 
 # Create the line plot using ggplot
-ggplot(selected_data, aes(x = year, y = employment_share, color = data_type, label = cagr10yrs, group = interaction( lmo_industry, data_type))) +
+ggplot(selected_data, aes(x = year, y = region_share, color = data_type, label = cagr10yrs, group = interaction( lmo_industry, data_type))) +
   geom_line() +
   geom_point() +
   labs(title = "Employment Trends by Region and Industry",
@@ -297,7 +310,7 @@ current_forecast_shares <- employment_trend_data |>
   filter(data_type == "current_forecast") |>
   arrange(lmo_industry, year, bc_region) |>  
   group_by(aggregate_industry, lmo_industry, bc_region) |>
-  summarize(!!paste("1.Forecast", paste0(cf_first_year, "-", cf_last_year)) := round((mean(employment_share, na.rm = TRUE)),3)) |> 
+  summarize(!!paste("1.Forecast", paste0(cf_first_year, "-", cf_last_year)) := round((mean(region_share, na.rm = TRUE)),3)) |> 
   ungroup()
 
 
@@ -309,7 +322,7 @@ lfs_last3yrs_share <- employment_trend_data |>
          year >= hist_recent_cutoff) |>
   arrange(lmo_industry, year, bc_region) |>  
   group_by(aggregate_industry, lmo_industry, bc_region) |>  
-  summarize(!!paste("2.Hist", paste0(hist_recent_cutoff, "-", hist_last_year)) := round((mean(employment_share, na.rm = TRUE)),3)) |>  
+  summarize(!!paste("2.Hist", paste0(hist_recent_cutoff, "-", hist_last_year)) := round((mean(region_share, na.rm = TRUE)),3)) |>  
   ungroup()
 
 ## 10 year average
@@ -318,7 +331,7 @@ lfs_prev10yrs_share  <- employment_trend_data |>
          year >= hist_prev_cutoff2 & year <= hist_prev_cutoff1) |>  
   arrange(lmo_industry, year, bc_region) |>  
   group_by(aggregate_industry, lmo_industry, bc_region) |> 
-  summarize(!!paste("3.Hist", paste0(hist_prev_cutoff2, "-", hist_prev_cutoff1)) := round((mean(employment_share, na.rm = TRUE)),3)) |>  
+  summarize(!!paste("3.Hist", paste0(hist_prev_cutoff2, "-", hist_prev_cutoff1)) := round((mean(region_share, na.rm = TRUE)),3)) |>  
   ungroup()
 
 
@@ -339,7 +352,6 @@ lfs_regional_shares <- lfs_last3yrs_share %>%
   full_join(lfs_prev10yrs_share)
 
 # join historical lfs shares with current forecast average shares
-# Dynamically create the column names using paste
 
 # Dynamically create the column names using paste
 hist_recent <- paste("2.Hist", paste0(hist_recent_cutoff, "-", hist_last_year))
