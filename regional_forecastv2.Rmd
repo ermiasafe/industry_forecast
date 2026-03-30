@@ -21,6 +21,7 @@ library(shiny)
 library(ggplot2)
 library(plotly)
 library(scales)
+library(fpp3)
 conflicts_prefer(dplyr::filter)
 
 
@@ -44,10 +45,11 @@ Sidebar {.sidebar data-width=300}
 =====================================
 
 Notes: \
-1) previous_forecast = 2nd cut \
-2) cagr10years calculation based on \
--\--> lfs historical = 10 years moving average \
--\--> lmo forecast (last year) = forecast data 
+1) current_forecast = 2025 LMO \
+2) previous_forecast = 2024 LMO \
+3) cagr10years calculation based on \
+\→ LFS historical = 10 years moving average \
+\→ LMO forecast (last year) = forecast data 
 
 
 
@@ -123,7 +125,7 @@ shinyWidgets::pickerInput(
   
   # Check box to show trendline (lowess smoothing)
   
-checkboxInput("show_trendline", "Show Lowess Trend", value = FALSE),
+checkboxInput("show_trendline", "Smoothed Trend (STL)", value = FALSE),
 
   
   # Region pickerInput
@@ -151,7 +153,7 @@ checkboxInput("show_trendline", "Show Lowess Trend", value = FALSE),
    # Toggle Y-axis view button
   actionButton("toggle_y_axis", label = "Toggle Y-Axis View", icon = icon("refresh")),
 
-tags$p(style = "color:blue;", HTML("Tip for chart view:<br>Y-axis at zero, then toggle.")),
+tags$p(style = "color:blue;", HTML("Chart view:<br>Toggle Individual/Shared Axis")),
 
 tags$p(
   style = "font-size:14px;",
@@ -208,8 +210,6 @@ observe({
 
 Employment trend
 ================================
-Column { horizontal_layout: scroll}
------------------------------------------------------------------------
 
 
 ```{r}
@@ -228,6 +228,26 @@ conditionalPanel(
 
 # Get Dark2 colors from RColorBrewer
 dark2_colors <- RColorBrewer::brewer.pal(8, "Dark2")
+
+# Pre-compute STL trend reactively based on current filters
+stl_trend_rv <- reactive({
+  req(input$show_trendline)
+  req(input$metric == "employment")  # <-- only run STL for employment metric
+  
+  employment_trend |>
+    filter(
+      lmo_industry %in% c(input$industry),
+      data_type == "lfs_historical",
+      bc_region %in% c(input$region)
+    ) |>
+    group_by(lmo_industry, bc_region, data_type) |>
+    filter(n() >= 5) |>
+    ungroup() |>
+    as_tsibble(key = c(lmo_industry, bc_region, data_type), index = year) |>
+    model(STL(employment ~ trend())) |>
+    components() |>
+    as_tibble()
+})
 
 employment_trend_rv <- reactive({
   # Filter data first
@@ -258,22 +278,20 @@ employment_trend_rv <- reactive({
   ) + 
     geom_line()
 
-  # Optional trendline
-  if (input$show_trendline) {
-    employ_trend_graph <- employ_trend_graph +
-      geom_smooth(
-        data = ~subset(., data_type == "lfs_historical"),
-        aes(x = year, y = .data[[input$metric]]),
-        method = "loess",
-        span = 0.80,
-        se = FALSE,
-        linetype = "dotted",
-        linewidth = 0.5,
-        alpha = 0.3,
-        colour = "gray40"
-      )
-  }
-
+ 
+# Optional trendline — employment metric only
+if (input$show_trendline && input$metric == "employment") {
+  stl_data <- stl_trend_rv()
+  employ_trend_graph <- employ_trend_graph +
+    geom_line(
+      data = stl_data,
+      aes(x = year, y = trend, group = interaction(lmo_industry, bc_region)),
+      colour = "gray40",
+      linewidth = 0.5,
+      alpha = 0.8,
+      inherit.aes = FALSE
+    )
+}
   # Labels and facets
   employ_trend_graph <- employ_trend_graph + 
     labs(x = "", y = "", title = input$industry) +
@@ -296,7 +314,7 @@ employment_trend_rv <- reactive({
   }
 
   # Return plotly object
-  ggplotly(employ_trend_graph, height = 850, width = 1375, tooltip = c("year", "colour", input$metric, "cagr10yrs"))
+  ggplotly(employ_trend_graph, tooltip = c("year", "colour", input$metric, "cagr10yrs"))
 })
 
  plotly::renderPlotly({
@@ -318,10 +336,9 @@ employment_trend_rv <- reactive({
 
 
 ```
+
 LMO industries by region
 ================================
-Column { vertical_layout: scroll}
------------------------------------------------------------------------
 
 ```{r}
 
@@ -350,6 +367,26 @@ employTrend_ind_rv <- reactive({
       bc_region %in% input$region2,
       data_type %in% input$trend_type
     ) 
+  
+  # STL for industry-faceted view (region2 filter, facets by lmo_industry)
+stl_trend_ind_rv <- reactive({
+  req(input$show_trendline)
+  req(input$metric == "employment")
+  
+  employment_trend |>
+    filter(
+      aggregate_industry %in% input$industry1,
+      data_type == "lfs_historical",
+      bc_region %in% input$region2        # <-- region2 not region
+    ) |>
+    group_by(lmo_industry, bc_region, data_type) |>
+    filter(n() >= 5) |>
+    ungroup() |>
+    as_tsibble(key = c(lmo_industry, bc_region, data_type), index = year) |>
+    model(STL(employment ~ trend())) |>
+    components() |>
+    as_tibble()
+})
 
   # ✅ Validation: Make sure at least one bc_region is present
   validate(
@@ -376,20 +413,18 @@ employ_trend_graph <- employ_trend |>
 
 
   # Optional trendline
-  if (input$show_trendline) {
-    employ_trend_graph <- employ_trend_graph +
-      geom_smooth(
-        data = ~subset(., data_type == "lfs_historical"),
-        aes(x = year, y = .data[[input$metric]]),
-        method = "loess",
-        span = 0.80,
-        se = FALSE,
-        linetype = "dotted",
-        linewidth = 0.5,
-        alpha = 0.3,
-        colour = "gray40"
-      )
-  }
+if (input$show_trendline && input$metric == "employment") {
+  stl_data <- stl_trend_ind_rv()          # <-- use the industry-faceted STL reactive
+  employ_trend_graph <- employ_trend_graph +
+    geom_line(
+      data = stl_data,
+      aes(x = year, y = trend, group = interaction(lmo_industry, bc_region)),
+      colour = "gray40",
+      linewidth = 0.5,
+      alpha = 0.8,
+      inherit.aes = FALSE
+    )
+}
 
   # Labels and facets
   employ_trend_graph <- employ_trend_graph + 
@@ -413,7 +448,7 @@ employ_trend_graph <- employ_trend |>
   }
 
   # Return plotly object
-  ggplotly(employ_trend_graph, height = 850, width = 1375, tooltip = c("year", "colour", input$metric, "cagr10yrs"))
+  ggplotly(employ_trend_graph,  tooltip = c("year", "colour", input$metric, "cagr10yrs"))
 })
 
  plotly::renderPlotly({
@@ -439,8 +474,7 @@ employ_trend_graph <- employ_trend |>
 
 Average annual shares of employment
 ================================
-Column { horizontal_layout: scroll}
------------------------------------------------------------------------
+
 
 ```{r}
 
@@ -462,7 +496,7 @@ Column { horizontal_layout: scroll}
       facet_wrap(~bc_region) +
       scale_fill_manual(values = dark2_colors)  # Apply Dark2 colors to the 'colour' aesthetic
     
-    ggplotly(reg_by_ind, height = 850, width = 1375)
+    ggplotly(reg_by_ind)
   })
 
   plotly::renderPlotly({
