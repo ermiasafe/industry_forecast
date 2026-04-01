@@ -23,6 +23,7 @@ library(plotly)
 library(scales)
 library(fpp3)
 conflicts_prefer(dplyr::filter)
+conflicts_prefer(dplyr::lag)
 
 
 region_by_industry <- vroom(here("output","industryForecast_regionShares.csv"), delim = ",") |> 
@@ -214,16 +215,16 @@ Employment trend
 
 ```{r}
   # This message only shows when employment_share and "British Columbia" are selected
-conditionalPanel(
-  condition = "
-    input.metric == 'region_share' &&
-    input.region.indexOf('British Columbia') >= 0
-  ",
-  tags$p(
-    style = "color:red;",
-    HTML("Tip: Deselect \"British Columbia\" for full chart view.")
-  )
-)
+# conditionalPanel(
+#   condition = "
+#     input.metric == 'region_share' &&
+#     input.region.indexOf('British Columbia') >= 0
+#   ",
+#   tags$p(
+#     style = "color:red;",
+#     HTML("Tip: Deselect \"British Columbia\" for full chart view.")
+#   )
+# )
 
 
 # Get Dark2 colors from RColorBrewer
@@ -246,7 +247,15 @@ stl_trend_rv <- reactive({
     as_tsibble(key = c(lmo_industry, bc_region, data_type), index = year) |>
     model(STL(employment ~ trend())) |>
     components() |>
-    as_tibble()
+    as_tibble() |>
+    group_by(lmo_industry, bc_region) |>          # <-- compute CAGR per group
+    mutate(
+      trend_cagr10yrs = scales::percent(           # <-- 10yr CAGR on smoothed trend
+        round((((trend / lag(trend, 10))^(1/10)) - 1), 3),
+        accuracy = 0.1
+      )
+    ) |>
+    ungroup()
 })
 
 employment_trend_rv <- reactive({
@@ -271,27 +280,48 @@ employment_trend_rv <- reactive({
     )
   }
 
-  # Graph of the employment trend 
-  employ_trend_graph <- employ_trend |> 
-    filter(input$metric != "industry_share") |>
-     ggplot(aes(x = year, y = .data[[input$metric]], group = data_type, colour = data_type, label = cagr10yrs)
-  ) + 
-    geom_line()
-
- 
-# Optional trendline — employment metric only
-if (input$show_trendline && input$metric == "employment") {
-  stl_data <- stl_trend_rv()
-  employ_trend_graph <- employ_trend_graph +
-    geom_line(
-      data = stl_data,
-      aes(x = year, y = trend, group = interaction(lmo_industry, bc_region)),
-      colour = "gray40",
-      linewidth = 0.5,
-      alpha = 0.8,
-      inherit.aes = FALSE
+  # Graph of the employment trend
+# Graph of the employment trend
+employ_trend_graph <- employ_trend |> 
+  filter(input$metric != "industry_share") |>
+  filter(!(input$metric == "region_share" & bc_region == "British Columbia")) |>  # <-- exclude BC for region_share
+  ggplot(aes(
+    x = year,
+    y = .data[[input$metric]],
+    group = data_type,
+    colour = data_type,
+    text = paste0(
+      "Year: ", year,
+      "<br>Type: ", data_type,
+      "<br>Employment: ", scales::comma(round(.data[[input$metric]], 0)),
+      "<br>CAGR (10yr): ", cagr10yrs
     )
-}
+  )) + 
+  geom_line()
+
+  # Optional trendline — employment metric only
+  if (input$show_trendline && input$metric == "employment") {
+    stl_data <- stl_trend_rv()
+    employ_trend_graph <- employ_trend_graph +
+      geom_line(
+        data = stl_data,
+        aes(
+          x = year,
+          y = trend,
+          group = interaction(lmo_industry, bc_region),
+          text = paste0(
+            "Year: ", year,
+            "<br>STL Trend: ", scales::comma(round(trend, 0)),
+            "<br>CAGR (10yr): ", trend_cagr10yrs   # <-- trend CAGR in tooltip
+          )
+        ),
+        colour = "gray40",
+        linewidth = 0.5,
+        alpha = 0.8,
+        inherit.aes = FALSE   # Avoid inheriting colour/group from parent aes
+      )
+  }
+
   # Labels and facets
   employ_trend_graph <- employ_trend_graph + 
     labs(x = "", y = "", title = input$industry) +
@@ -313,16 +343,19 @@ if (input$show_trendline && input$metric == "employment") {
       )
   }
 
-  # Return plotly object
-  ggplotly(employ_trend_graph, tooltip = c("year", "colour", input$metric, "cagr10yrs"))
+  # Return plotly object — tooltip = "text" covers all layers including STL
+  ggplotly(employ_trend_graph, tooltip = "text")
 })
 
- plotly::renderPlotly({
-   
-     employment_trend_rv() |>
-      #plotly::style(showlegend = FALSE) |>
-      plotly::layout(margin = list(b = 10),
-              legend = list(
+plotly::renderPlotly({
+  employment_trend_rv() |>
+    #plotly::style(showlegend = FALSE) |>
+    plotly::layout(
+      margin = list(b = 10),
+      hoverlabel = list(
+        font = list(color = "white")  # <-- white tooltip text across all traces
+      ),
+      legend = list(
         orientation = "h",       # Horizontal orientation
         x = 0.5,                 # Center the legend horizontally
         xanchor = "center",      # Anchor the legend at the center horizontally
@@ -330,10 +363,8 @@ if (input$show_trendline && input$metric == "employment") {
         yanchor = "top",         # Anchor the legend at the top (relative to y)
         title = list(text = "")  # Remove the title by setting it to an empty string
       )
-      )
-
-  })
-
+    )
+})
 
 ```
 
@@ -357,6 +388,33 @@ selectInput("region2",
 #   tags$p(style = "color:red;", HTML("Warning: Must select one region at a time"))
 # )
 
+# STL for industry-faceted view (region2 filter, facets by lmo_industry)
+stl_trend_ind_rv <- reactive({
+  req(input$show_trendline)
+  req(input$metric == "employment")  # <-- only run STL for employment metric
+  
+  employment_trend |>
+    filter(
+      aggregate_industry %in% input$industry1,
+      data_type == "lfs_historical",
+      bc_region %in% input$region2        # <-- region2 not region
+    ) |>
+    group_by(lmo_industry, bc_region, data_type) |>
+    filter(n() >= 5) |>                   # <-- drop groups with too few years
+    ungroup() |>
+    as_tsibble(key = c(lmo_industry, bc_region, data_type), index = year) |>
+    model(STL(employment ~ trend())) |>
+    components() |>
+    as_tibble() |>
+    group_by(lmo_industry, bc_region) |>  # <-- compute CAGR per group
+    mutate(
+      trend_cagr10yrs = scales::percent(  # <-- 10yr CAGR on smoothed trend
+        round((((trend / lag(trend, 10))^(1/10)) - 1), 3),
+        accuracy = 0.1
+      )
+    ) |>
+    ungroup()
+})
 
 employTrend_ind_rv <- reactive({
   # Filter data first
@@ -367,64 +425,60 @@ employTrend_ind_rv <- reactive({
       bc_region %in% input$region2,
       data_type %in% input$trend_type
     ) 
-  
-  # STL for industry-faceted view (region2 filter, facets by lmo_industry)
-stl_trend_ind_rv <- reactive({
-  req(input$show_trendline)
-  req(input$metric == "employment")
-  
-  employment_trend |>
-    filter(
-      aggregate_industry %in% input$industry1,
-      data_type == "lfs_historical",
-      bc_region %in% input$region2        # <-- region2 not region
-    ) |>
-    group_by(lmo_industry, bc_region, data_type) |>
-    filter(n() >= 5) |>
-    ungroup() |>
-    as_tsibble(key = c(lmo_industry, bc_region, data_type), index = year) |>
-    model(STL(employment ~ trend())) |>
-    components() |>
-    as_tibble()
-})
 
   # ✅ Validation: Make sure at least one bc_region is present
   validate(
     need(nrow(employ_trend) > 0, "Applying filter updates...")
   )
   
-   # Check for unsupported metric
+  # Check for unsupported metric
   if (input$metric == "region_share") {
     validate(
       need(FALSE, 'Please select "industry_share" or "employment" in the LM Metric dropdown.')
     )
   }
 
-# Graph of the employment trend 
-# Filter out 'industry_share' before plotting
-employ_trend_graph <- employ_trend |>
-  filter(input$metric != "region_share") |> 
-  ggplot(aes(x = year,
-             y = .data[[input$metric]],
-             group = data_type,
-             colour = data_type,
-             label = cagr10yrs)) +
-  geom_line()
+  # Graph of the employment trend
+  # Filter out 'region_share' and 'British Columbia' for industry_share before plotting
+  employ_trend_graph <- employ_trend |>
+    filter(input$metric != "region_share") |>
+    #filter(!(input$metric == "industry_share" & bc_region == "British Columbia")) |>  # <-- exclude BC for industry_share
+    ggplot(aes(
+      x = year,
+      y = .data[[input$metric]],
+      group = data_type,
+      colour = data_type,
+      text = paste0(
+        "Year: ", year,
+        "<br>Type: ", data_type,
+        "<br>Employment: ", scales::comma(round(.data[[input$metric]], 0)),
+        "<br>CAGR (10yr): ", cagr10yrs
+      )
+    )) +
+    geom_line()
 
-
-  # Optional trendline
-if (input$show_trendline && input$metric == "employment") {
-  stl_data <- stl_trend_ind_rv()          # <-- use the industry-faceted STL reactive
-  employ_trend_graph <- employ_trend_graph +
-    geom_line(
-      data = stl_data,
-      aes(x = year, y = trend, group = interaction(lmo_industry, bc_region)),
-      colour = "gray40",
-      linewidth = 0.5,
-      alpha = 0.8,
-      inherit.aes = FALSE
-    )
-}
+  # Optional trendline — employment metric only
+  if (input$show_trendline && input$metric == "employment") {
+    stl_data <- stl_trend_ind_rv()         # <-- use the industry-faceted STL reactive
+    employ_trend_graph <- employ_trend_graph +
+      geom_line(
+        data = stl_data,
+        aes(
+          x = year,
+          y = trend,
+          group = interaction(lmo_industry, bc_region),
+          text = paste0(
+            "Year: ", year,
+            "<br>STL Trend: ", scales::comma(round(trend, 0)),
+            "<br>CAGR (10yr): ", trend_cagr10yrs   # <-- trend CAGR in tooltip
+          )
+        ),
+        colour = "gray40",
+        linewidth = 0.5,
+        alpha = 0.8,
+        inherit.aes = FALSE   # Avoid inheriting colour/group from parent aes
+      )
+  }
 
   # Labels and facets
   employ_trend_graph <- employ_trend_graph + 
@@ -447,16 +501,19 @@ if (input$show_trendline && input$metric == "employment") {
       )
   }
 
-  # Return plotly object
-  ggplotly(employ_trend_graph,  tooltip = c("year", "colour", input$metric, "cagr10yrs"))
+  # Return plotly object — tooltip = "text" covers all layers including STL
+  ggplotly(employ_trend_graph, tooltip = "text")
 })
 
- plotly::renderPlotly({
-   
-     employTrend_ind_rv() |>
-      #plotly::style(showlegend = FALSE) |>
-      plotly::layout(margin = list(b = 10),
-              legend = list(
+plotly::renderPlotly({
+  employTrend_ind_rv() |>
+    #plotly::style(showlegend = FALSE) |>
+    plotly::layout(
+      margin = list(b = 10),
+      hoverlabel = list(
+        font = list(color = "white")  # <-- white tooltip text across all traces
+      ),
+      legend = list(
         orientation = "h",       # Horizontal orientation
         x = 0.5,                 # Center the legend horizontally
         xanchor = "center",      # Anchor the legend at the center horizontally
@@ -464,9 +521,8 @@ if (input$show_trendline && input$metric == "employment") {
         yanchor = "top",         # Anchor the legend at the top (relative to y)
         title = list(text = "")  # Remove the title by setting it to an empty string
       )
-      )
-
-  })
+    )
+})
  
 
 
@@ -572,3 +628,4 @@ renderUI({
 
 
 ```
+
