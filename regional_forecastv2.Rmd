@@ -1,5 +1,5 @@
 ---
-title: 'Industry Forecast: Regional Overview (2025 Edition)'
+title: 'Industry Forecast: Regional Overview (2026 Edition)'
 output:
   flexdashboard::flex_dashboard:
     orientation: columns
@@ -27,7 +27,7 @@ conflicts_prefer(dplyr::lag)
 
 
 region_by_industry <- vroom(here("output","industryForecast_regionShares.csv"), delim = ",") |> 
-  arrange(aggregate_industry, lmo_industry)
+  arrange(stokes_industry, lmo_industry)
 
 
 library(scales)
@@ -45,12 +45,13 @@ employment_trend <- vroom(here("output","industryForecast_regionTrends.csv"), de
 Sidebar {.sidebar data-width=300}
 =====================================
 
-Notes: \
-1) current_forecast = 2025 LMO \
-2) previous_forecast = 2024 LMO \
-3) cagr10years calculation based on \
-\→ LFS historical = 10 years moving average \
-\→ LMO forecast (last year) = forecast data 
+**Notes:** 
+
++ current_forecast = 2026 5th Cut 
++ previous_forecast = 2026 4th Cut 
++ CAGR for LFS (historical) 
+\→ 10 Yrs MA
+
 
 
 
@@ -58,7 +59,7 @@ Notes: \
   # # Application title
   # 
   #                  shinyWidgets::pickerInput("industry1", label = "Select Aggregate Industry",
-  #                              choices = unique(employment_trend$aggregate_industry),
+  #                              choices = unique(employment_trend$stokes_industry),
   #                              selected = "Accomodation and food services", options = list(`live-search`=TRUE))
   # 
   #                  selectInput("industry", label = "Select LMO Industry",
@@ -72,18 +73,17 @@ Notes: \
 
 
 # custom aggregate industry order
-industry_order <- c("Agriculture and fishing", "Mining and oil and gas extraction", "Construction",
-        "Manufacturing", "Retail trade", "Transportation and warehousing",
-        "Finance, insurance and real estate", "Professional, scientific and technical services",
-        "Business, building and other support services", "Educational services",
-        "Health care and Social assistance", "Information, culture and recreation",
-        "Accommodation and food services", "Repair, personal and non-profit services",
-        "Public administration", "Total")
+industry_order <- c("Agriculture", "Oil & Gas", "Other Other Primary", "Construction", "Manufacturing",
+        "Utilities", "Transportation & Warehousing", "Trade", 
+        "Finance, Insurance & Real Estate", "Professional, Scientific & Technological",
+        "Business, Building & Other Support Services", "Accommodation & Food Services",
+        "Education Services", "Health & Social Services", "Other Services",
+         "Government Services", "Total")
                     
 # Application title and UI components grouped with space between them
 tags$div(
   # Industry pickerInput
-  shinyWidgets::pickerInput("industry1", label = "Select Aggregate Industry",
+  shinyWidgets::pickerInput("industry1", label = "Select Stokes Industry",
                             choices = industry_order,
                             selected = "Accomodation and food services", options = list(`live-search`=TRUE)),
   
@@ -110,16 +110,16 @@ shinyWidgets::pickerInput(
   tags$br(),
   
   # Trend type checkbox group
-  shinyWidgets::prettyCheckboxGroup(
-    inputId = "trend_type",
-    label = "Select Trend to Show", 
-    choices = unique(employment_trend$data_type),
-    selected = unique(employment_trend$data_type),
-    icon = icon("square-check"), 
-    status = "primary",
-    outline = TRUE,
-    animation = "jelly"
-  ),
+shinyWidgets::prettyCheckboxGroup(
+  inputId = "trend_type",
+  label = "Select Trend to Show", 
+  choices = unique(employment_trend$data_type),
+  selected = setdiff(unique(employment_trend$data_type), "internal_forecast"),  # all except internal
+  icon = icon("square-check"), 
+  status = "primary",
+  outline = TRUE,
+  animation = "jelly"
+),
   
   # # Add space after the trend type checkbox group
   # tags$br(),
@@ -140,21 +140,21 @@ checkboxInput("show_trendline", "Smoothed Trend (STL)", value = FALSE),
     width = "100%"
   ),
 
-
     # Add space after the buttons
   tags$br(),
 
-    # Button for Y-axis fixed at zero
-  actionButton("fixed_zero", label = "Fix Y-Axis at Zero", icon = icon("arrows-alt-v")), 
-  
-    # Add space after the buttons
-  tags$br(),
-  tags$br(),
-
-   # Toggle Y-axis view button
+  # Toggle Y-axis view button
   actionButton("toggle_y_axis", label = "Toggle Y-Axis View", icon = icon("refresh")),
 
-tags$p(style = "color:blue;", HTML("Chart view:<br>Toggle Individual/Shared Axis")),
+tags$p(style = "color:blue;", HTML("Toggle Individual/Shared Axis")),
+  
+    # Add space after the buttons
+    # tags$br(),
+
+   # Button for Y-axis fixed at zero
+  #actionButton("fixed_zero", label = "Fix Y-Axis at Zero", icon = icon("arrows-alt-v")), 
+ 
+
 
 tags$p(
   style = "font-size:14px;",
@@ -172,29 +172,32 @@ y_axis_scale <- reactiveVal("free_y")  # default to free_y for dynamic scaling
 y_axis_limits <- reactiveVal(c(NA, NA))  # default to no limits
 
 # Observe event for toggling Y-axis view
+
+
 observeEvent(input$toggle_y_axis, {
   # Toggle the Y-axis view between "free_y" and "fixed"
   if (y_axis_scale() == "free_y") {
     y_axis_scale("fixed")
-    y_axis_limits(c(NA, NA))  # Reset to no fixed limits
+    y_axis_limits(c(0, NA))  # fix at zero when toggling on
   } else {
     y_axis_scale("free_y")
+    y_axis_limits(c(NA, NA))
   }
 })
 
 # Observe event for fixing Y-axis at zero
-observeEvent(input$fixed_zero, {
-  # Set Y-axis to be fixed at zero
-  y_axis_scale("fixed")
-  y_axis_limits(c(0, NA))  # Fix Y-axis starting at zero
-})
-
+# observeEvent(input$fixed_zero, {
+#   # Set Y-axis to be fixed at zero
+#   y_axis_scale("fixed")
+#   y_axis_limits(c(0, NA))  # Fix Y-axis starting at zero
+# })
+# 
 
 
 observe({
   # Filter based on input from another pickerInput ("industry1")
   x <- region_by_industry |>
-    filter(aggregate_industry %in% input$industry1) |>
+    filter(stokes_industry %in% input$industry1) |>
     pull(lmo_industry)  # more direct than select() + unique()
 
   # Update the "industry" pickerInput with the filtered choices
@@ -262,7 +265,7 @@ employment_trend_rv <- reactive({
   # Filter data first
   employ_trend <- employment_trend |> 
     filter(
-      aggregate_industry %in% input$industry1, 
+      stokes_industry %in% input$industry1, 
       lmo_industry %in% input$industry,
       bc_region %in% input$region,
       data_type %in% input$trend_type
@@ -395,7 +398,7 @@ stl_trend_ind_rv <- reactive({
   
   employment_trend |>
     filter(
-      aggregate_industry %in% input$industry1,
+      stokes_industry %in% input$industry1,
       data_type == "lfs_historical",
       bc_region %in% input$region2        # <-- region2 not region
     ) |>
@@ -420,7 +423,7 @@ employTrend_ind_rv <- reactive({
   # Filter data first
   employ_trend <- employment_trend |> 
     filter(
-      aggregate_industry %in% input$industry1, 
+      stokes_industry %in% input$industry1, 
       #lmo_industry %in% input$industry,
       bc_region %in% input$region2,
       data_type %in% input$trend_type
@@ -538,7 +541,7 @@ Average annual shares of employment
   region_industry_rv <- reactive({
     
     reg_by_ind <- region_by_industry |> 
-      filter(aggregate_industry %in% c(input$industry1), lmo_industry %in% c(input$industry)) 
+      filter(stokes_industry %in% c(input$industry1), lmo_industry %in% c(input$industry)) 
       
   # ✅ Validation: Make sure at least one bc_region is present
   validate(
@@ -576,8 +579,8 @@ Column { vertical_layout: scroll}
 inputPanel(
   numericInput("beginning_value", "Beginning Value", value = 1000, min = 0, step = 1),
   numericInput("ending_value", "Ending Value", value = 2000, min = 0, step = 1),
-  numericInput("start_year", "Start Year", value = 2025, min = 1900, step = 1),
-  numericInput("end_year", "End Year", value = 2035, min = 1900, step = 1)
+  numericInput("start_year", "Start Year", value = 2026, min = 1900, step = 1),
+  numericInput("end_year", "End Year", value = 2036, min = 1900, step = 1)
 )
 
 # Function to calculate Compound Annual Growth Rate (CAGR)

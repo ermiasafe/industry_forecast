@@ -60,11 +60,11 @@ hist_emp_allReg <- lfs_data(files)
 
 # Names need updating every year
 
-hist_last_year = 2024 # lfs data most recent year available
-cf_first_year = 2025 # current forecast first year
+hist_last_year = 2025 # lfs data most recent year available
+cf_first_year = 2026 # current forecast first year
 cf_last_year = cf_first_year + 10
 
-pf_first_year = cf_first_year # previous forecast first year. This should be -1 when the previous forecast is last year
+pf_first_year = cf_first_year - 1 # previous forecast first year. This should be -1 when the previous forecast is last year
 
 hist_recent_cutoff = hist_last_year - 2 # most recent three years
 hist_prev_cutoff1 = hist_last_year - 3 # end of previous ten years
@@ -75,8 +75,8 @@ hist_prev_cutoff2 = hist_prev_cutoff1 - 10 # start of previous ten years
 #STEP 2: COMBINING LFS HISTORICAL AND INDUSTRY MAPPING
 
 ### import industry mapping
-industry_mapping <- vroom(here("input", "industry_mapping_2025_with_stokes_agg.csv"), delim = ",") |> 
-  transmute(naics_5, aggregate_industry, lmo_ind_code, lmo_industry = lmo_detailed_industry) 
+industry_mapping <- vroom(here("input", "industry_mapping_2026_with_stokes_agg.csv"), delim = ",") |> 
+  transmute(naics_5, stokes_industry, lmo_ind_code, lmo_industry = lmo_detailed_industry) 
  
 
 # Import the most recent mapping and join with the historical data
@@ -109,14 +109,14 @@ hist_emp_reg <- pivot_longer(hist_emp_regWide, cols = 6:13, names_to = "bc_regio
 # group by lmo industry 
 
 historical_data_0 <- hist_emp_reg |> 
-  group_by(bc_region, year, aggregate_industry, lmo_industry) |> 
+  group_by(bc_region, year, stokes_industry, lmo_industry) |> 
   summarize(historical = sum(historical, na.rm = TRUE))
 
 # Calculate the total for each region and year (sum of all industries)
 total_data <- hist_emp_reg |>
   group_by(bc_region, year) |>
   summarize(historical = sum(historical, na.rm = TRUE)) |>
-  mutate(lmo_industry = "Total", aggregate_industry = "Total")  # Create a new value to represent the total
+  mutate(lmo_industry = "Total", stokes_industry = "Total")  # Create a new value to represent the total
 
 # Combine the total data with the original data
 historical_data <- bind_rows(historical_data_0, total_data) |> 
@@ -190,7 +190,10 @@ employment_forecast_long <- employment_forecast |>
     values_to = "employment"
   ) |>
   mutate(year = as.integer(year), employment = employment*1000) |>    # optional: convert year to integer
-  filter(year >= pf_first_year) |> # filter out historical data from Stokes
+  filter(
+    (data_type == "previous_forecast" & year >= pf_first_year) |
+      (data_type == "current_forecast" & year >= cf_first_year)
+  ) |>  # filter out historical data from Stokes
   select(bc_region, year, data_type, lmo_industry, employment) |> 
   # Renaming some industries to match LFS industry names
   mutate(lmo_industry = case_when(lmo_industry == "Non-Residential building construction" ~ "Non-residential building construction",
@@ -203,7 +206,7 @@ employment_forecast_long <- employment_forecast |>
 
  # map aggregate industry but first group to rid of naics code 
 industry_map_grp <- industry_mapping |> 
-  group_by(aggregate_industry, lmo_industry) |> 
+  group_by(stokes_industry, lmo_industry) |> 
   summarise(count = n(), .groups = "drop") |> 
   select(-count)
 
@@ -218,7 +221,7 @@ employment_forecast_mapped <- employment_forecast_long |>
 employment_trend_data0 <- bind_rows(employment_forecast_mapped, historical_data) |> 
   relocate(year, .after = lmo_industry) |> 
   relocate(data_type, .before = bc_region) |> 
-  arrange(data_type, bc_region, aggregate_industry, lmo_industry, year) |> 
+  arrange(data_type, bc_region, stokes_industry, lmo_industry, year) |> 
   group_by(bc_region, data_type, lmo_industry) |> 
   mutate(
     employment = round(employment, 0),
@@ -257,14 +260,14 @@ employment_share_by_industry <- employment_trend_data0 |>
 # Calculate industry share of employment by region
 employment_share_by_region <- employment_trend_data0 |>
   filter(lmo_industry != "Total") |> 
-  group_by(data_type, bc_region, aggregate_industry, year) |> 
+  group_by(data_type, bc_region, stokes_industry, year) |> 
   mutate(industry_share = employment/sum(employment))
 
 #Check share calculation
 share_check <- employment_share_by_region |> 
   filter(bc_region == "Vancouver Island and Coast", year == 2024, 
          data_type == "lfs_historical", 
-         aggregate_industry == "Educational services")
+         stokes_industry == "Educational services")
   
 # Merge shares to trend data
 
@@ -309,7 +312,7 @@ ggplot(selected_data, aes(x = year, y = region_share, color = data_type, label =
 current_forecast_shares <- employment_trend_data |>
   filter(data_type == "current_forecast") |>
   arrange(lmo_industry, year, bc_region) |>  
-  group_by(aggregate_industry, lmo_industry, bc_region) |>
+  group_by(stokes_industry, lmo_industry, bc_region) |>
   summarize(!!paste("1.Forecast", paste0(cf_first_year, "-", cf_last_year)) := round((mean(region_share, na.rm = TRUE)),3)) |> 
   ungroup()
 
@@ -321,7 +324,7 @@ lfs_last3yrs_share <- employment_trend_data |>
   filter(data_type == "lfs_historical",
          year >= hist_recent_cutoff) |>
   arrange(lmo_industry, year, bc_region) |>  
-  group_by(aggregate_industry, lmo_industry, bc_region) |>  
+  group_by(stokes_industry, lmo_industry, bc_region) |>  
   summarize(!!paste("2.Hist", paste0(hist_recent_cutoff, "-", hist_last_year)) := round((mean(region_share, na.rm = TRUE)),3)) |>  
   ungroup()
 
@@ -330,7 +333,7 @@ lfs_prev10yrs_share  <- employment_trend_data |>
   filter(data_type == "lfs_historical",
          year >= hist_prev_cutoff2 & year <= hist_prev_cutoff1) |>  
   arrange(lmo_industry, year, bc_region) |>  
-  group_by(aggregate_industry, lmo_industry, bc_region) |> 
+  group_by(stokes_industry, lmo_industry, bc_region) |> 
   summarize(!!paste("3.Hist", paste0(hist_prev_cutoff2, "-", hist_prev_cutoff1)) := round((mean(region_share, na.rm = TRUE)),3)) |>  
   ungroup()
 
@@ -394,3 +397,4 @@ test
 
 vroom_write(data_region, here("output","industryForecast_regionShares.csv"), delim = ",")
 vroom_write(employment_trend_data, here("output","industryForecast_regionTrends.csv"), delim = ",")
+
